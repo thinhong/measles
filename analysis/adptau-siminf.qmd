@@ -1,0 +1,91 @@
+---
+title: "Compare adaptivetau and SimInf"
+bibliography: references.bib
+csl: nature.csl
+---
+
+```{r, warning=FALSE, message=FALSE}
+library(adaptivetau)
+library(SimInf)
+library(bench)
+library(ggplot2)
+```
+
+Notes:
+
+-   Gillespie SSA stands for "Gillespie Stochastic Simulation Algorithm" (see this paper[@ganyani2021] by Prof. Niel Hens)
+-   Both [`SimInf`](https://cran.r-project.org/web/packages/SimInf/index.html) and [`adaptivetau`](https://cran.r-project.org/web/packages/adaptivetau/index.html) implement Gillespie SSA (see prove in links).
+
+`SimInf` authors claimed that they are 20 times faster than `adaptivetau`.
+
+![](../img/adptau-siminf.png)
+
+SIR model with `adaptivetau` and `SimInf`
+
+```{r}
+sir_adptau <- function(N = 1000, n = 1, I0 = 1, beta0, gamma0, tf = 100, f = adaptivetau::ssa.adaptivetau) {
+  
+  inits <- c(S = N - I0, I = I0, R = 0)
+  
+  transitions <- list(c(S = -1, I = +1),  # infectious
+                      c(I = -1, R = +1))  # recovery
+  
+  lvrates <- function(x, params, t) {with(c(x, params),
+    c(
+      # prob of infection (per time unit)
+      beta * S * I / N,
+      # prob of recovery (per time unit)
+      gamma * I))
+  }
+  
+  l <- list()
+  
+  for (i in 1:n) {
+    l[[i]] <- data.frame(f(inits, transitions, lvrates, params = list(beta = beta0, gamma = gamma0), tf = tf))
+  }
+  
+  l
+}
+
+# https://github.com/stewid/SimInf
+sir_siminf <- function(N = 1000, n = 1, I0 = 1, beta0, gamma0, tf = 100) {
+  
+  sir <- c("S -> beta * S * I / N -> I",
+          "I -> gamma * I -> R",
+          "N <- S + I + R")
+  
+  compartments <- c("S", "I", "R")
+  
+  u0 <- data.frame(S = rep(N - I0, n), I = rep(I0, n), R = rep(0, n))
+  
+  model <- mparse(transitions = sir, compartments = compartments, gdata = c(beta = beta0, gamma = gamma0), u0 = u0, tspan = 1:tf)
+  run(model)
+}
+```
+
+`adaptivetau`
+
+```{r}
+df <- sir_adptau(beta0 = 0.160, gamma0 = 0.077, n = 1)
+head(df[[1]])
+```
+
+`SimInf`
+
+```{r}
+df <- sir_siminf(beta0 = 0.160, gamma0 = 0.077, n = 1)
+df <- data.frame(trajectory(df))
+head(df[df$node == 1,])
+```
+
+Now compare the two functions
+
+```{r}
+bmk <- bench::mark(
+  SimInf = sir_siminf(beta0 = 0.160, gamma0 = 0.077, n = 1000),
+  adptau = sir_adptau(beta0 = 0.160, gamma0 = 0.077, n = 1000),
+  check = F
+)
+
+plot(bmk)
+```
